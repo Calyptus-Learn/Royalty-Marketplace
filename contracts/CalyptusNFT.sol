@@ -18,23 +18,15 @@ contract CalyptusNFT is
 
     Counters.Counter private _tokenIdCounter;
 
-    uint256 private royaltyFee;
-    address private royaltyRecipient;
-
     constructor(
         string memory _name,
         string memory _symbol,
         address _owner,
-        uint256 _royaltyFee,
+        uint96 _royaltyFee,
         address _royaltyRecipient
     ) ERC721(_name, _symbol) {
-        require(_royaltyFee <= 10000, "can't be more than 10 percent");
-        require(
-            _royaltyRecipient != address(0),
-            "The royalty recipient can't be a 0 address"
-        );
-        royaltyFee = _royaltyFee;
-        royaltyRecipient = _royaltyRecipient;
+        _setDefaultRoyalty(_royaltyRecipient, _royaltyFee);
+
         transferOwnership(_owner);
     }
 
@@ -43,19 +35,6 @@ contract CalyptusNFT is
         _tokenIdCounter.increment();
         _safeMint(to, tokenId);
         _setTokenURI(tokenId, uri);
-    }
-
-    function getRoyaltyFee() external view returns (uint256) {
-        return royaltyFee;
-    }
-
-    function getRoyaltyRecipient() external view returns (address) {
-        return royaltyRecipient;
-    }
-
-    function updateRoyaltyFee(uint256 _royaltyFee) external onlyOwner {
-        require(_royaltyFee <= 10000, "can't more than 10 percent");
-        royaltyFee = _royaltyFee;
     }
 
     // The following functions are overrides required by Solidity.
