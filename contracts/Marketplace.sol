@@ -4,26 +4,10 @@ pragma solidity ^0.8.14;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
-import "contracts/Interfaces/ICalyptusNFT.sol";
+import "contracts/Interfaces/IRentableNFT.sol";
+import "contracts/MarketplaceDatatypes.sol";
 
-contract CalyptusNFTMarketplace is Ownable {
-    // struct
-    struct ListedNFT {
-        address nft;
-        uint256 tokenId;
-        address seller;
-        address payToken;
-        uint256 price;
-        bool sold;
-    }
-
-    struct OfferDetails {
-        address nft;
-        uint256 tokenId;
-        address offerer;
-        uint256 offerPrice;
-    }
-
+contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes {
     uint256 private platformFee;
     address private feeRecipient;
 
@@ -38,26 +22,16 @@ contract CalyptusNFTMarketplace is Ownable {
         private offers;
 
     constructor(uint256 _platformFee, address _feeRecipient) {
-        require(_platformFee <= 10000, "can't be more than 10 percent");
+        if (_platformFee > 10_00) revert FeeMoreThan10Percent();
+        if (_feeRecipient == address(0)) revert ZeroAddress();
         platformFee = _platformFee;
         feeRecipient = _feeRecipient;
     }
 
     modifier isListedNFT(address _nft, uint256 _tokenId) {
-        ListedNFT memory listedNFT = listedNfts[_nft][_tokenId];
-        require(
-            listedNFT.seller != address(0) && !listedNFT.sold,
-            "not listed"
-        );
-        _;
-    }
-
-    modifier isNotListedNFT(address _nft, uint256 _tokenId) {
-        ListedNFT memory listedNFT = listedNfts[_nft][_tokenId];
-        require(
-            listedNFT.seller == address(0) || listedNFT.sold,
-            "already listed"
-        );
+        address seller = listedNfts[_nft][_tokenId].seller;
+        bool sold = listedNfts[_nft][_tokenId].sold;
+        if (seller == address(0) || sold) revert NFTNotListed();
         _;
     }
 
@@ -66,19 +40,14 @@ contract CalyptusNFTMarketplace is Ownable {
         uint256 _tokenId,
         address _offerer
     ) {
-        OfferDetails memory offer = offers[_nft][_tokenId][_offerer];
-        require(
-            offer.offerPrice > 0 && offer.offerer != address(0),
-            "not offered nft"
-        );
+        uint256 offerPrice = offers[_nft][_tokenId][_offerer].offerPrice;
+        if (offerPrice == 0) revert OfferDoesNotExist();
         _;
     }
 
     modifier isPayableToken(address _payToken) {
-        require(
-            _payToken != address(0) && payableToken[_payToken],
-            "invalid pay token"
-        );
+        if (_payToken == address(0)) revert ZeroAddress();
+        if (!payableToken[_payToken]) revert InvalidPayToken();
         _;
     }
 
@@ -90,25 +59,30 @@ contract CalyptusNFTMarketplace is Ownable {
      * @param _price the price of NFT
      */
     function createSale(
-        ICalyptusNFT _nft,
+        address _nft,
         uint256 _tokenId,
         address _payToken,
         uint256 _price
     ) external isPayableToken(_payToken) {
-        require(_nft.ownerOf(_tokenId) == msg.sender, "not nft owner");
-        _nft.transferFrom(msg.sender, address(this), _tokenId);
-        address nftAddress = address(_nft);
+        IRentableNFT nft = IRentableNFT(_nft);
 
-        listedNfts[nftAddress][_tokenId] = ListedNFT({
-            nft: nftAddress,
+        if (nft.ownerOf(_tokenId) != msg.sender) revert CallerNotOwner();
+        ListedNFT memory listedNFT = listedNfts[_nft][_tokenId];
+
+        if (listedNFT.seller != address(0) && !listedNFT.sold)
+            revert NFTAlreadyListed();
+
+        listedNfts[_nft][_tokenId] = ListedNFT({
+            nft: _nft,
             tokenId: _tokenId,
             seller: msg.sender,
             payToken: _payToken,
             price: _price,
             sold: false
         });
+        nft.safeTransferFrom(msg.sender, address(this), _tokenId);
 
-        emit NFTListed(nftAddress, _tokenId, _payToken, _price, msg.sender);
+        emit NFTListed(_nft, _tokenId, _payToken, _price, msg.sender);
     }
 
     /**
@@ -121,64 +95,67 @@ contract CalyptusNFTMarketplace is Ownable {
         uint256 _tokenId
     ) external isListedNFT(_nft, _tokenId) {
         ListedNFT memory listedNFT = listedNfts[_nft][_tokenId];
-        require(listedNFT.seller == msg.sender, "Only Lister");
-        IERC721(_nft).transferFrom(address(this), msg.sender, _tokenId);
+        if (listedNFT.seller != msg.sender) revert CallerNotLister();
         delete listedNfts[_nft][_tokenId];
+        IERC721(_nft).safeTransferFrom(address(this), msg.sender, _tokenId);
     }
 
     /**
      * @notice buy a NFT from marketplace
      * @param _nft NFT collection address to buy
      * @param _tokenId specified NFT id to buy
-     * @param _payToken ERC-20 token address for trading
      * @param _price NFT price
      */
     function buy(
         address _nft,
         uint256 _tokenId,
-        address _payToken,
         uint256 _price
     ) external isListedNFT(_nft, _tokenId) {
         ListedNFT storage listedNft = listedNfts[_nft][_tokenId];
-        require(_payToken == listedNft.payToken, "invalid pay token");
-        require(!listedNft.sold, "nft already sold");
-        require(_price >= listedNft.price, "invalid price");
+        if (listedNft.sold) revert AlreadySold();
+        if (_price < listedNft.price) revert InvalidPrice();
 
         listedNft.sold = true;
 
         uint256 payablePrice = _price;
-        ICalyptusNFT nft = ICalyptusNFT(listedNft.nft);
+        IRentableNFT nft = IRentableNFT(listedNft.nft);
         (address royaltyRecipient, uint256 royalty) = nft.royaltyInfo(
             _tokenId,
             _price
         );
 
-        if (royalty > 0) {
+        if (royalty != 0) {
             payablePrice -= royalty;
 
             // Transfer royalty fee to the collection owner
-            IERC20(listedNft.payToken).transferFrom(
-                msg.sender,
-                royaltyRecipient,
-                royalty
-            );
+            if (
+                !IERC20(listedNft.payToken).transferFrom(
+                    msg.sender,
+                    royaltyRecipient,
+                    royalty
+                )
+            ) revert PayTokenTransferFailed();
         }
 
         // Calculate & Transfer platform fee
         uint256 platformFeeTotal = calculatePlatformFee(_price);
         payablePrice -= platformFeeTotal;
-        IERC20(listedNft.payToken).transferFrom(
-            msg.sender,
-            feeRecipient,
-            platformFeeTotal
-        );
+        if (
+            !IERC20(listedNft.payToken).transferFrom(
+                msg.sender,
+                feeRecipient,
+                platformFeeTotal
+            )
+        ) revert PayTokenTransferFailed();
 
         // Transfer payablePrice to the nft owner
-        IERC20(listedNft.payToken).transferFrom(
-            msg.sender,
-            listedNft.seller,
-            payablePrice
-        );
+        if (
+            !IERC20(listedNft.payToken).transferFrom(
+                msg.sender,
+                listedNft.seller,
+                payablePrice
+            )
+        ) revert PayTokenTransferFailed();
 
         // Transfer NFT to buyer
         IERC721(listedNft.nft).safeTransferFrom(
@@ -198,7 +175,7 @@ contract CalyptusNFTMarketplace is Ownable {
     }
 
     /**
-     *
+     * @notice offer an alternate price to the lister for their NFT
      * @param _nft address of NFT
      * @param _tokenId TokenId
      * @param _offerPrice Price offered
@@ -208,10 +185,8 @@ contract CalyptusNFTMarketplace is Ownable {
         uint256 _tokenId,
         uint256 _offerPrice
     ) external isListedNFT(_nft, _tokenId) {
-        require(_offerPrice > 0, "price can not 0");
+        if (_offerPrice == 0) revert InvalidPrice();
         address _payToken = listedNfts[_nft][_tokenId].payToken;
-
-        IERC20(_payToken).transferFrom(msg.sender, address(this), _offerPrice);
 
         offers[_nft][_tokenId][msg.sender] = OfferDetails({
             nft: _nft,
@@ -220,7 +195,15 @@ contract CalyptusNFTMarketplace is Ownable {
             offerPrice: _offerPrice
         });
 
-        emit OfferedNFT(_nft, _tokenId, _payToken, _offerPrice, msg.sender);
+        emit NewOffer(_nft, _tokenId, _payToken, _offerPrice, msg.sender);
+
+        if (
+            !IERC20(_payToken).transferFrom(
+                msg.sender,
+                address(this),
+                _offerPrice
+            )
+        ) revert PayTokenTransferFailed();
     }
 
     /**
@@ -233,14 +216,18 @@ contract CalyptusNFTMarketplace is Ownable {
         uint256 _tokenId
     ) external ifOfferExists(_nft, _tokenId, msg.sender) {
         OfferDetails memory offer = offers[_nft][_tokenId][msg.sender];
-        require(offer.offerer == msg.sender, "not offerer");
+        if (offer.offerer != msg.sender) revert CallerNotOfferer();
 
         ListedNFT memory listedNFT = listedNfts[_nft][_tokenId];
-        require(!listedNFT.sold, "already sold");
-
+        if (listedNFT.sold) revert AlreadySold();
         delete offers[_nft][_tokenId][msg.sender];
-        IERC20(listedNFT.payToken).transfer(offer.offerer, offer.offerPrice);
-        emit CanceledOfferedNFT(_nft, _tokenId, msg.sender);
+        if (
+            !IERC20(listedNFT.payToken).transfer(
+                offer.offerer,
+                offer.offerPrice
+            )
+        ) revert PayTokenTransferFailed();
+        emit OfferCanceled(_nft, _tokenId, msg.sender);
     }
 
     /**
@@ -260,42 +247,50 @@ contract CalyptusNFTMarketplace is Ownable {
     {
         ListedNFT storage list = listedNfts[_nft][_tokenId];
 
-        require(list.seller == msg.sender, "not listed owner");
-        require(!list.sold, "already sold");
+        if (list.seller != msg.sender) revert CallerNotLister();
+        if (list.sold) revert AlreadySold();
 
-        uint256 offerPrice = offers[_nft][_tokenId][_offerer].offerPrice;
-        address offerer = offers[_nft][_tokenId][_offerer].offerer;
+        OfferDetails memory offer = offers[_nft][_tokenId][_offerer];
 
         list.sold = true;
 
-        uint256 totalPrice = offerPrice;
-        ICalyptusNFT nft = ICalyptusNFT(_nft);
+        uint256 totalPrice = offer.offerPrice;
+        IRentableNFT nft = IRentableNFT(_nft);
 
         (address royaltyRecipient, uint256 royalty) = nft.royaltyInfo(
-            _tokenId,
-            offerPrice
+            list.tokenId,
+            offer.offerPrice
         );
 
         IERC20 payToken = IERC20(list.payToken);
 
-        if (royalty > 0) {
+        if (royalty != 0) {
             totalPrice -= royalty;
             // Transfer royalty fee to collection owner
-            payToken.transfer(royaltyRecipient, royalty);
+            if (!payToken.transfer(royaltyRecipient, royalty))
+                revert PayTokenTransferFailed();
         }
 
         // Calculate & Transfer platform fee
-        uint256 platformFeeTotal = calculatePlatformFee(offerPrice);
+        uint256 platformFeeTotal = calculatePlatformFee(offer.offerPrice);
         totalPrice -= platformFeeTotal;
-        payToken.transfer(feeRecipient, platformFeeTotal);
+        if (!payToken.transfer(feeRecipient, platformFeeTotal))
+            revert PayTokenTransferFailed();
 
         // Transfer to seller
-        payToken.transfer(list.seller, totalPrice);
+        if (!payToken.transfer(list.seller, totalPrice))
+            revert PayTokenTransferFailed();
 
         // Transfer NFT to offerer
-        nft.safeTransferFrom(address(this), offerer, _tokenId);
+        nft.safeTransferFrom(address(this), offer.offerer, offer.tokenId);
 
-        emit AcceptedNFT(_nft, _tokenId, offerPrice, offerer, list.seller);
+        emit OfferAccepted(
+            offer.nft,
+            offer.tokenId,
+            offer.offerPrice,
+            offer.offerer,
+            list.seller
+        );
     }
 
     function calculatePlatformFee(
@@ -322,55 +317,19 @@ contract CalyptusNFTMarketplace is Ownable {
     }
 
     function addPayableToken(address _token) external onlyOwner {
-        require(_token != address(0), "invalid token");
-        require(!payableToken[_token], "already payable token");
+        if (_token == address(0)) revert ZeroAddress();
+        if (payableToken[_token]) revert TokenAlreadyAdded();
         payableToken[_token] = true;
         tokens.push(_token);
     }
 
     function updatePlatformFee(uint256 _platformFee) external onlyOwner {
-        require(_platformFee <= 10000, "can't more than 10 percent");
+        if (_platformFee > 10_00) revert FeeMoreThan10Percent();
         platformFee = _platformFee;
     }
 
     function changeFeeRecipient(address _feeRecipient) external onlyOwner {
-        require(_feeRecipient != address(0), "can't be 0 address");
+        if (_feeRecipient == address(0)) revert ZeroAddress();
         feeRecipient = _feeRecipient;
     }
-
-    // events
-    event NFTListed(
-        address indexed nft,
-        uint256 indexed tokenId,
-        address payToken,
-        uint256 price,
-        address indexed seller
-    );
-    event BoughtNFT(
-        address indexed nft,
-        uint256 indexed tokenId,
-        address payToken,
-        uint256 price,
-        address seller,
-        address indexed buyer
-    );
-    event OfferedNFT(
-        address indexed nft,
-        uint256 indexed tokenId,
-        address payToken,
-        uint256 offerPrice,
-        address indexed offerer
-    );
-    event CanceledOfferedNFT(
-        address indexed nft,
-        uint256 indexed tokenId,
-        address indexed offerer
-    );
-    event AcceptedNFT(
-        address indexed nft,
-        uint256 indexed tokenId,
-        uint256 offerPrice,
-        address offerer,
-        address indexed nftOwner
-    );
 }

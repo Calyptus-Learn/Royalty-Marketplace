@@ -22,19 +22,18 @@ contract CalyptusNFT is
         string memory _name,
         string memory _symbol,
         address _owner,
-        uint96 _royaltyFee,
-        address _royaltyRecipient
+        uint96 royaltyFee,
+        address royaltyRecipient
     ) ERC721(_name, _symbol) {
-        _setDefaultRoyalty(_royaltyRecipient, _royaltyFee);
-
+        _setDefaultRoyalty(royaltyRecipient, royaltyFee);
         transferOwnership(_owner);
     }
 
     function safeMint(address to, string memory uri) public onlyOwner {
         uint256 tokenId = _tokenIdCounter.current();
         _tokenIdCounter.increment();
-        _safeMint(to, tokenId);
         _setTokenURI(tokenId, uri);
+        _safeMint(to, tokenId);
     }
 
     // The following functions are overrides required by Solidity.

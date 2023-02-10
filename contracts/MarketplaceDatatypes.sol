@@ -1,7 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.14;
 
-interface IMarketplace {
+// Errors
+error ZeroAddress();
+error PayTokenTransferFailed();
+error FeeMoreThan10Percent();
+error NFTNotListed();
+error OfferDoesNotExist();
+error InvalidPayToken();
+error NFTAlreadyListed();
+error CallerNotLister();
+error CallerNotOwner();
+error CallerNotOfferer();
+error AlreadySold();
+error InvalidPrice();
+error TokenAlreadyAdded();
+
+interface MarketplaceDataTypes {
+    // struct
     struct ListedNFT {
         address nft;
         uint256 tokenId;
@@ -15,7 +31,6 @@ interface IMarketplace {
         address nft;
         uint256 tokenId;
         address offerer;
-        address payToken;
         uint256 offerPrice;
     }
 
@@ -35,22 +50,21 @@ interface IMarketplace {
         address seller,
         address indexed buyer
     );
-    event OfferedNFT(
+    event NewOffer(
         address indexed nft,
         uint256 indexed tokenId,
         address payToken,
         uint256 offerPrice,
         address indexed offerer
     );
-    event CanceledOfferedNFT(
+    event OfferCanceled(
         address indexed nft,
         uint256 indexed tokenId,
         address indexed offerer
     );
-    event AcceptedNFT(
+    event OfferAccepted(
         address indexed nft,
         uint256 indexed tokenId,
-        address payToken,
         uint256 offerPrice,
         address offerer,
         address indexed nftOwner
