@@ -70,11 +70,11 @@ contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes, ERC721Holder {
     ) external isPayableToken(_payToken) {
         IRentableNFT nft = IRentableNFT(_nft);
 
-        // check if the lister is owner of the NFT
+        // lister is owner of the NFT
         if (nft.ownerOf(_tokenId) != msg.sender) revert CallerNotOwner();
         ListedNFT memory listedNFT = listedNfts[_nft][_tokenId];
 
-        // check if the NFT is not already listed
+        // NFT is not already listed
         if (listedNFT.seller != address(0) && !listedNFT.sold)
             revert NFTAlreadyListed();
 

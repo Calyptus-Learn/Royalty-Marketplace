@@ -58,7 +58,7 @@ describe("Test to accept sale at alternate offered price:", function () {
     expect(res.price).to.equal("100");
   });
 
-  it("Offerer makes offer, Lister accepts it", async function () {
+  it("Offerer makes offer, Lister accepts offer", async function () {
     // Equivalent of NFT buyer getting ERC20 token to make offer
     await payToken.connect(payTokenDeployer).mint(nftBuyer.address, 50);
 
@@ -72,20 +72,25 @@ describe("Test to accept sale at alternate offered price:", function () {
     await marketplace
       .connect(nftOwner)
       .acceptOffer(nft.address, 0, nftBuyer.address);
+  });
 
-    // check if the buyer has the NFT now:
+  it("buyer has the NFT", async function () {
     expect(await nft.ownerOf(0)).to.equal(nftBuyer.address);
+  });
 
-    // check if the previous owner does not have the NFT any more
+  it("previous owner does not have the NFT any more", async function () {
     expect(await nft.ownerOf(0)).to.not.equal(nftOwner);
+  });
 
-    // check if the previous owner got the price
+  it("previous owner got the price", async function () {
     expect(await payToken.balanceOf(nftOwner.address)).to.equal(40);
+  });
 
-    // check if the marketplace got the fee
+  it("marketplace got the fee", async function () {
     expect(await payToken.balanceOf(marketplaceOwner.address)).to.equal(5);
+  });
 
-    // check if the Creator got the royalty
+  it("Creator got the royalty", async function () {
     expect(await payToken.balanceOf(nftCreator.address)).to.equal(5);
   });
 });

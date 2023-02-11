@@ -45,7 +45,7 @@ describe("Test to list an nft:", function () {
     expect(await nft.tokenURI(0)).to.equal("google.com");
   });
 
-  it("lists and de-lists the listed NFT from the marketplace", async function () {
+  it("conduct listing", async function () {
     // approve the marketplace for the transfer of NFT
     await nft.connect(nftOwner).approve(marketplace.address, 0);
     expect(await nft.getApproved(0)).to.equal(marketplace.address);
@@ -58,10 +58,21 @@ describe("Test to list an nft:", function () {
     expect(res.seller).to.equal(nftOwner.address);
     expect(res.tokenId).to.equal("0");
     expect(res.price).to.equal("100");
+  });
 
-    // delist the listed NFT
+  it("smart contract storage is updated", async function () {
+    var res = await marketplace.getListedNFT(nft.address, 0);
+    expect(res.seller).to.equal(nftOwner.address);
+    expect(res.tokenId).to.equal("0");
+    expect(res.price).to.equal("100");
+  });
+
+  it("marketplace has the ownership of the listed NFT", async function () {
+    expect(await nft.ownerOf(0)).to.equal(marketplace.address);
+  });
+
+  it("de-lists the listed NFT from the marketplace", async function () {
     await marketplace.connect(nftOwner).cancelListedNFT(nft.address, 0);
-
     expect(await nft.ownerOf(0)).to.equal(nftOwner.address);
   });
 });
