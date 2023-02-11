@@ -3,11 +3,11 @@ pragma solidity ^0.8.14;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 import "contracts/Interfaces/IRentableNFT.sol";
 import "contracts/MarketplaceDatatypes.sol";
 
-contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes {
+contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes, ERC721Holder {
     uint256 private platformFee;
     address private feeRecipient;
 
@@ -21,6 +21,10 @@ contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes {
     mapping(address => mapping(uint256 => mapping(address => OfferDetails)))
         private offers;
 
+    /**
+     * @param _platformFee platform fee (*10^2) eg. for 1%, put 100
+     * @param _feeRecipient address of receiver of the platform fee
+     */
     constructor(uint256 _platformFee, address _feeRecipient) {
         if (_platformFee > 10_00) revert FeeMoreThan10Percent();
         if (_feeRecipient == address(0)) revert ZeroAddress();
@@ -52,7 +56,7 @@ contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes {
     }
 
     /**
-     * @notice put the NFT on marketplace
+     * @notice list the NFT on marketplace
      * @param _nft specified NFT collection address
      * @param _tokenId specified NFT id to sell
      * @param _payToken ERC-20 token address for trading
@@ -66,12 +70,15 @@ contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes {
     ) external isPayableToken(_payToken) {
         IRentableNFT nft = IRentableNFT(_nft);
 
+        // check if the lister is owner of the NFT
         if (nft.ownerOf(_tokenId) != msg.sender) revert CallerNotOwner();
         ListedNFT memory listedNFT = listedNfts[_nft][_tokenId];
 
+        // check if the NFT is not already listed
         if (listedNFT.seller != address(0) && !listedNFT.sold)
             revert NFTAlreadyListed();
 
+        // update storage
         listedNfts[_nft][_tokenId] = ListedNFT({
             nft: _nft,
             tokenId: _tokenId,
@@ -80,6 +87,8 @@ contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes {
             price: _price,
             sold: false
         });
+
+        // transfer the NFT from the lister to the marketplace
         nft.safeTransferFrom(msg.sender, address(this), _tokenId);
 
         emit NFTListed(_nft, _tokenId, _payToken, _price, msg.sender);
@@ -112,6 +121,7 @@ contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes {
         uint256 _price
     ) external isListedNFT(_nft, _tokenId) {
         ListedNFT storage listedNft = listedNfts[_nft][_tokenId];
+
         if (listedNft.sold) revert AlreadySold();
         if (_price < listedNft.price) revert InvalidPrice();
 
@@ -197,6 +207,7 @@ contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes {
 
         emit NewOffer(_nft, _tokenId, _payToken, _offerPrice, msg.sender);
 
+        // transfer payToken from the offerer to the marketplace
         if (
             !IERC20(_payToken).transferFrom(
                 msg.sender,
@@ -220,7 +231,10 @@ contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes {
 
         ListedNFT memory listedNFT = listedNfts[_nft][_tokenId];
         if (listedNFT.sold) revert AlreadySold();
+
         delete offers[_nft][_tokenId][msg.sender];
+
+        // return payToken to the offerer
         if (
             !IERC20(listedNFT.payToken).transfer(
                 offer.offerer,
@@ -293,12 +307,21 @@ contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes {
         );
     }
 
+    /**
+     * @notice calculates the marketplace's cut in any sale as per price
+     * @param _price price at which an NFT is to be sold
+     */
     function calculatePlatformFee(
         uint256 _price
     ) public view returns (uint256) {
         return (_price * platformFee) / 10_000;
     }
 
+    /**
+     * @notice get the details of a particular listed token
+     * @param _nft address of the concerned NFT
+     * @param _tokenId tokenId of the concerned NFT
+     */
     function getListedNFT(
         address _nft,
         uint256 _tokenId
@@ -306,16 +329,27 @@ contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes {
         return listedNfts[_nft][_tokenId];
     }
 
+    /**
+     * @notice get a list of all payable ERC20 tokens
+     */
     function getPayableTokens() external view returns (address[] memory) {
         return tokens;
     }
 
+    /**
+     * @notice check by address if an ERC20 token is an accepted mode of payment
+     * @param _payableToken address of the concerned ERC20 token
+     */
     function checkIsPayableToken(
         address _payableToken
     ) external view returns (bool) {
         return payableToken[_payableToken];
     }
 
+    /**
+     * @notice Owner can add new ERC20 tokens to be accepted as mode of payment
+     * @param _token address of the concerned ERC20 token to be added
+     */
     function addPayableToken(address _token) external onlyOwner {
         if (_token == address(0)) revert ZeroAddress();
         if (payableToken[_token]) revert TokenAlreadyAdded();
@@ -323,11 +357,19 @@ contract CalyptusNFTMarketplace is Ownable, MarketplaceDataTypes {
         tokens.push(_token);
     }
 
+    /**
+     * @notice Owner can update the platform fee, can't be more than 10%
+     * @param _platformFee new platform fee (*10^2) eg. for 1%, put 100
+     */
     function updatePlatformFee(uint256 _platformFee) external onlyOwner {
         if (_platformFee > 10_00) revert FeeMoreThan10Percent();
         platformFee = _platformFee;
     }
 
+    /**
+     * @notice owner can change the receiver of the platform fee
+     * @param _feeRecipient new receiver of the platform fee
+     */
     function changeFeeRecipient(address _feeRecipient) external onlyOwner {
         if (_feeRecipient == address(0)) revert ZeroAddress();
         feeRecipient = _feeRecipient;

@@ -18,6 +18,13 @@ contract CalyptusNFT is
 
     Counters.Counter private _tokenIdCounter;
 
+    /**
+     * @param _name Name of the NFT
+     * @param _symbol Symbol of the NFT
+     * @param _owner Address of the Creator
+     * @param royaltyFee Royalty fee (*10^2) eg. for 1%, put 100
+     * @param royaltyRecipient Address of the receiver of the royalty
+     */
     constructor(
         string memory _name,
         string memory _symbol,
@@ -29,15 +36,19 @@ contract CalyptusNFT is
         transferOwnership(_owner);
     }
 
+    /**
+     * @notice Mint a new NFT
+     * @param to Address of the receiver of the NFT
+     * @param uri URI to be attached to the NFT
+     */
     function safeMint(address to, string memory uri) public onlyOwner {
         uint256 tokenId = _tokenIdCounter.current();
         _tokenIdCounter.increment();
-        _setTokenURI(tokenId, uri);
         _safeMint(to, tokenId);
+        _setTokenURI(tokenId, uri);
     }
 
     // The following functions are overrides required by Solidity.
-
     function _burn(
         uint256 tokenId
     ) internal override(ERC721Royalty, ERC721URIStorage, ERC721) {
